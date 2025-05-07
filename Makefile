@@ -7,8 +7,10 @@ SRC := $(wildcard src/*.c)
 OUT_DIR := build
 OUT := ${OUT_DIR}/${EXE}
 
+O ?= 2
+
 ${OUT}: ${SRC} ${OUT_DIR}
-	${CC} ${SRC} -O2 -o $@
+	${CC} ${SRC} -O$O ${CCFLAGS} -o $@
 
 ${OUT_DIR}:
 	mkdir $@
