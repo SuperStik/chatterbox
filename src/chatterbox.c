@@ -211,6 +211,8 @@ static void acceptclient(int kq, int listener) {
 
 	if (kevent(kq, &event, 1, NULL, 0, NULL) < 0)
 		err(2, "kevent");
+
+	printf("Client %i connected\n", client);
 }
 
 static void writeclient(int client, const char *msg) {
@@ -218,6 +220,8 @@ static void writeclient(int client, const char *msg) {
 
 	if (write(client, msg, len) < 0)
 		err(2, "write");
+
+	printf("Client %i disconnected\n", client);
 
 	if (close(client))
 		err(2, "close");
