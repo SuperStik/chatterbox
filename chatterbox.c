@@ -86,6 +86,17 @@ int main(int argc, char **argv) {
 static int clientloop(const char *host, const char *serv) {
 	int sock = newconnect(host, serv);
 
+	char buf[1024];
+
+	ssize_t readcount = 0;
+	do {
+		readcount = read(sock, buf, 1024);
+
+		if (readcount > 0)
+			fwrite(buf, 1, readcount, stdout);
+	} while (readcount > 0);
+	putchar('\n');
+
 	if (close(sock) < 0)
 		err(2, "close");
 
@@ -203,7 +214,7 @@ static void acceptclient(int kq, int listener) {
 }
 
 static void writeclient(int client, const char *msg) {
-	size_t len = strlen(msg) + 1;
+	size_t len = strlen(msg);
 
 	if (write(client, msg, len) < 0)
 		err(2, "write");
