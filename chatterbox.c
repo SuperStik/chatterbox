@@ -1,5 +1,6 @@
 #define __DARWIN_NON_CANCELABLE 1
 #include <err.h>
+#include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <signal.h>
@@ -22,6 +23,7 @@ static int clientloop(const char *host, const char *serv);
 static int serverloop(const char *host, const char *serv);
 
 static void bindsocket(int sock, const char *host, const char *serv);
+static int newconnect(const char *host, const char *serv);
 
 static int setnbio(int fd) {
 	int flags;
@@ -77,7 +79,49 @@ int main(int argc, char **argv) {
 }
 
 static int clientloop(const char *host, const char *serv) {
+	int sock = newconnect(host, serv);
+
+	if (close(sock) < 0)
+		err(2, "close");
+
 	return 0;
+}
+
+static int newconnect(const char *host, const char *serv) {
+	struct addrinfo *info;
+	struct addrinfo hints = {0};
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_flags = AI_V4MAPPED_CFG | AI_ALL;
+	hints.ai_protocol = IPPROTO_TCP;
+
+	int gairet = getaddrinfo(host, serv, &hints, &info);
+	if (gairet)
+		errx(2, "getaddrinfo: %s", gai_strerror(gairet));
+	int sock = - 1;
+	int conn = -1;
+	for (struct addrinfo *i = info; i != NULL; i = i->ai_next) {
+		sock = socket(i->ai_family, SOCK_STREAM, IPPROTO_TCP);
+		if (sock < 0)
+			continue;
+
+		conn = connect(sock, i->ai_addr, i->ai_addrlen);
+		if (conn) {
+			close(sock);
+			continue;
+		} else
+			break;
+	}
+
+	freeaddrinfo(info);
+
+	if (sock < 0)
+		err(2, "socket");
+
+	if (conn)
+		err(2, "connect");
+
+	return sock;
 }
 
 static int serverloop(const char *host, const char *serv) {
