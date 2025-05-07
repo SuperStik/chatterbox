@@ -7,6 +7,9 @@
 static void setupsignals(void);
 static void printhelp(const char *argv0);
 
+static int clientloop(const char *host, const char *serv);
+static int serverloop(const char *host, const char *serv);
+
 static char active = 1;
 
 int main(int argc, char **argv) {
@@ -37,7 +40,20 @@ int main(int argc, char **argv) {
 		}
 
 	}
+
 	setupsignals();
+
+	if (server)
+		return serverloop(host, serv);
+	else
+		return clientloop(host, serv);
+}
+
+static int clientloop(const char *host, const char *serv) {
+	return 0;
+}
+
+static int serverloop(const char *host, const char *serv) {
 	return 0;
 }
 
