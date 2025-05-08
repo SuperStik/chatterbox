@@ -176,7 +176,7 @@ static int serverloop(const char *host, const char *serv) {
 		err(2, "kevent");
 
 	while(active) {
-		struct kevent eventlist[4];
+		struct kevent eventlist[CHAT_MAXCON];
 		memset(eventlist, 0, sizeof(eventlist));
 
 		int nevents = kevent(kq, NULL, 0, eventlist, 4, NULL);
