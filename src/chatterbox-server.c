@@ -4,11 +4,11 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
-#include <signal.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/event.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -21,20 +21,13 @@
 
 #include "chatterbox.h"
 
-static void setupsignals(void);
-static void printhelp(const char *argv0);
-
-static int clientloop(const char *host, const char *serv);
-static int serverloop(const char *host, const char *serv);
-
 static void bindsocket(int sock, const char *host, const char *serv);
-static int newconnect(const char *host, const char *serv);
 
 static void acceptclient(int kq, int listener);
 static void writeclient(int client, const char *msg, ssize_t msgsize,
 		struct client *);
+
 static size_t readclient(int client, char *msg, struct client *);
-static struct client clients[CHAT_MAXCON];
 
 static int setnbio(int fd) {
 	int flags;
@@ -50,107 +43,9 @@ static int setnbio(int fd) {
 #endif
 }
 
-static char active = 1;
+static struct client clients[CHAT_MAXCON];
 
-int main(int argc, char **argv) {
-	char server = 0;
-	int opt;
-	const char *host = NULL;
-	const char *serv = "8196";
-	while((opt = getopt(argc, argv, "a:chp:s")) > -1 ) {
-		switch(opt) {
-			case 'a':
-				host = optarg;
-				break;
-			case 'c':
-				server = 0;
-				break;
-			case 'h':
-				printhelp(argv[0]);
-				return 0;
-			case 'p':
-				serv = optarg;
-				break;
-			case 's':
-				server = 1;
-				break;
-			default:
-				printhelp(argv[0]);
-				return 1;
-		}
-
-	}
-
-	setupsignals();
-
-	if (server)
-		return serverloop(host, serv);
-	else
-		return clientloop(host, serv);
-}
-
-static int clientloop(const char *host, const char *serv) {
-	int sock = newconnect(host, serv);
-
-	if (write(sock, "HELLO", strlen("HELLO")) < 0)
-		err(2, "write");
-
-	char buf[1024];
-	ssize_t readcount = 0;
-	do {
-		readcount = read(sock, buf, 1024);
-
-		if (readcount > 0)
-			fwrite(buf, 1, readcount, stdout);
-		else if (readcount < 0)
-			err(2, "read");
-	} while (readcount > 0);
-	putchar('\n');
-
-	if (close(sock) < 0)
-		err(2, "close");
-
-	return 0;
-}
-
-static int newconnect(const char *host, const char *serv) {
-	struct addrinfo *info;
-	struct addrinfo hints = {0};
-	hints.ai_family = AF_UNSPEC;
-	hints.ai_socktype = SOCK_STREAM;
-	hints.ai_flags = AI_V4MAPPED_CFG | AI_ALL;
-	hints.ai_protocol = IPPROTO_TCP;
-
-	int gairet = getaddrinfo(host, serv, &hints, &info);
-	if (gairet)
-		errx(2, "getaddrinfo: %s", gai_strerror(gairet));
-	int sock = - 1;
-	int conn = -1;
-	for (struct addrinfo *i = info; i != NULL; i = i->ai_next) {
-		sock = socket(i->ai_family, SOCK_STREAM, IPPROTO_TCP);
-		if (sock < 0)
-			continue;
-
-		conn = connect(sock, i->ai_addr, i->ai_addrlen);
-		if (conn) {
-			close(sock);
-			continue;
-		} else
-			break;
-	}
-
-	freeaddrinfo(info);
-
-	if (sock < 0)
-		err(2, "socket");
-
-	if (conn)
-		err(2, "connect");
-
-	return sock;
-}
-
-static int serverloop(const char *host, const char *serv) {
+int serverloop(const char *host, const char *serv) {
 	for (size_t i = 0; i < CHAT_MAXCON; ++i)
 		clients[i].fd = -1;
 
@@ -343,31 +238,4 @@ static void bindsocket(int sock, const char *host, const char *serv) {
 		err(2, "bind");
 
 	freeaddrinfo(info);
-}
-
-static void setinactive(int _) {
-	(void)_;
-	active = 0;
-}
-
-static void setupsignals(void) {
-	sigset_t mask;
-	sigemptyset(&mask);
-
-	const struct sigaction action = {
-		.sa_handler = setinactive,
-		.sa_mask = mask,
-		.sa_flags = SA_RESTART
-	};
-
-	if (sigaction(SIGINT, &action, NULL))
-		err(2, "sigaction");
-
-	if (sigaction(SIGQUIT, &action, NULL))
-		err(2, "sigaction");
-}
-
-static void printhelp(const char *argv0) {
-	fprintf(stderr, "usage: %s [-h] [-c | -s] [-a host] [-p service]\n",
-			argv0);
 }

@@ -12,4 +12,9 @@ struct client {
 	int fd;
 };
 
+int clientloop(const char *host, const char *serv);
+int serverloop(const char *host, const char *serv);
+
+extern char active;
+
 #endif /* CHATTERBOX_H */
