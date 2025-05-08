@@ -1,5 +1,6 @@
 #define __DARWIN_NON_CANCELABLE 1
 #include <err.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -30,7 +31,7 @@ static void bindsocket(int sock, const char *host, const char *serv);
 static int newconnect(const char *host, const char *serv);
 
 static void acceptclient(int kq, int listener);
-static void writeclient(int client, const char *msg);
+static void writeclient(int client, const char *msg, struct client *);
 
 static struct client clients[CHAT_MAXCON];
 
@@ -179,7 +180,9 @@ static int serverloop(const char *host, const char *serv) {
 		memset(eventlist, 0, sizeof(eventlist));
 
 		int nevents = kevent(kq, NULL, 0, eventlist, 4, NULL);
-		if (nevents < 0)
+		if (nevents < 0 && errno == EINTR)
+			continue;
+		else if (nevents < 0)
 			err(2, "kevent");
 
 		for (int i = 0; i < nevents; ++i) {
@@ -188,7 +191,8 @@ static int serverloop(const char *host, const char *serv) {
 					acceptclient(kq, eventlist[i].ident);
 					break;
 				case EVFILT_WRITE:
-					writeclient(eventlist[i].ident, "TEST");
+					writeclient(eventlist[i].ident, "TEST",
+							eventlist[i].udata);
 					break;
 			}
 		}
@@ -210,27 +214,45 @@ static void acceptclient(int kq, int listener) {
 		return;
 	}
 
+	int id;
+	for (id = 0; id < CHAT_MAXCON; ++id) {
+		if (clients[id].fd < 0)
+			break;
+	}
+
+	if (id >= CHAT_MAXCON) {
+		warnx("Rejecting client on socket %i: Too many clients!",
+				client);
+		close(client);
+		return;
+	}
+
+	clients[id].fd = client;
+	clients[id].msgleft = 0;
+
 	if (setnbio(client) == -1)
 		err(2, NBERRSTR);
 
 	struct kevent event = {0};
-	EV_SET(&event, client, EVFILT_WRITE, EV_ADD, 0, 0, 0);
+	EV_SET(&event, client, EVFILT_WRITE, EV_ADD, 0, 0, &(clients[id]));
 
 	if (kevent(kq, &event, 1, NULL, 0, NULL) < 0)
 		err(2, "kevent");
 
-	printf("Client %i connected\n", client);
+	printf("Client %i connected\n", id);
 }
 
-static void writeclient(int client, const char *msg) {
+static void writeclient(int fd, const char *msg, struct client *client) {
 	size_t len = strlen(msg);
 
-	if (write(client, msg, len) < 0)
+	if (write(fd, msg, len) < 0)
 		err(2, "write");
 
-	printf("Client %i disconnected\n", client);
+	printf("Client %ti disconnected\n", client - clients);
 
-	if (close(client))
+	client->fd = -1;
+
+	if (close(fd))
 		err(2, "close");
 }
 
