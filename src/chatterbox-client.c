@@ -35,6 +35,7 @@ static int setnbio(int fd) {
 #endif
 }
 
+__attribute__((visibility("hidden")))
 int clientloop(const char *host, const char *serv) {
 	int sock = newconnect(host, serv);
 

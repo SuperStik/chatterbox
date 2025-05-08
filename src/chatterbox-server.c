@@ -45,6 +45,7 @@ static int setnbio(int fd) {
 
 static struct client clients[CHAT_MAXCON];
 
+__attribute__((visibility("hidden")))
 int serverloop(const char *host, const char *serv) {
 	for (size_t i = 0; i < CHAT_MAXCON; ++i)
 		clients[i].fd = -1;
