@@ -20,8 +20,8 @@ ${OUT}: ${OBJ}
 ${OBJ_DIR}/%.o: ${SRC_DIR}/%.c ${OBJ_DIR}
 	${CC} $< -O$O -o $@ -c ${CCFLAGS}
 
-${OBJ_DIR}: ${OUT_DIR}
-	mkdir $@
+${OBJ_DIR}:
+	mkdir -p $@
 
 ${OUT_DIR}:
 	mkdir $@
