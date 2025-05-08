@@ -170,7 +170,7 @@ static int serverloop(const char *host, const char *serv) {
 		err(2, "kqueue");
 
 	struct kevent event = {0};
-	EV_SET(&event, listener, EVFILT_READ, EV_ADD, 0, 0, 0);
+	EV_SET(&event, listener, EVFILT_READ, EV_ADD, 0, 0, NULL);
 
 	if (kevent(kq, &event, 1, NULL, 0, NULL) < 0)
 		err(2, "kevent");
