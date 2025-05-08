@@ -18,6 +18,8 @@
 # define NBERRSTR "fcntl"
 #endif /* O_NONBLOCK */
 
+#include "chatterbox.h"
+
 static void setupsignals(void);
 static void printhelp(const char *argv0);
 
@@ -29,6 +31,8 @@ static int newconnect(const char *host, const char *serv);
 
 static void acceptclient(int kq, int listener);
 static void writeclient(int client, const char *msg);
+
+static struct client clients[CHAT_MAXCON];
 
 static int setnbio(int fd) {
 	int flags;
@@ -141,6 +145,9 @@ static int newconnect(const char *host, const char *serv) {
 }
 
 static int serverloop(const char *host, const char *serv) {
+	for (size_t i = 0; i < CHAT_MAXCON; ++i)
+		clients[i].fd = -1;
+
 	int listener = socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
 	if (listener < 0)
 		err(2, "socket");
