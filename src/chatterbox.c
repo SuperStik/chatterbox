@@ -31,8 +31,9 @@ static void bindsocket(int sock, const char *host, const char *serv);
 static int newconnect(const char *host, const char *serv);
 
 static void acceptclient(int kq, int listener);
-static void writeclient(int client, const char *msg, struct client *);
-
+static void writeclient(int client, const char *msg, ssize_t msgsize,
+		struct client *);
+static size_t readclient(int client, char *msg, struct client *);
 static struct client clients[CHAT_MAXCON];
 
 static int setnbio(int fd) {
@@ -91,14 +92,18 @@ int main(int argc, char **argv) {
 static int clientloop(const char *host, const char *serv) {
 	int sock = newconnect(host, serv);
 
-	char buf[1024];
+	if (write(sock, "HELLO", strlen("HELLO")) < 0)
+		err(2, "write");
 
+	char buf[1024];
 	ssize_t readcount = 0;
 	do {
 		readcount = read(sock, buf, 1024);
 
 		if (readcount > 0)
 			fwrite(buf, 1, readcount, stdout);
+		else if (readcount < 0)
+			err(2, "read");
 	} while (readcount > 0);
 	putchar('\n');
 
@@ -175,6 +180,9 @@ static int serverloop(const char *host, const char *serv) {
 	if (kevent(kq, &event, 1, NULL, 0, NULL) < 0)
 		err(2, "kevent");
 
+	char chatmsg[256];
+	ssize_t msgsize = 0;
+	int readstate = CHATSTATE_RDONLY;
 	while(active) {
 		struct kevent eventlist[CHAT_MAXCON];
 		memset(eventlist, 0, sizeof(eventlist));
@@ -186,13 +194,53 @@ static int serverloop(const char *host, const char *serv) {
 			err(2, "kevent");
 
 		for (int i = 0; i < nevents; ++i) {
+			if (eventlist[i].ident == listener) {
+				acceptclient(kq, eventlist[i].ident);
+				continue;
+			}
 			switch(eventlist[i].filter) {
 				case EVFILT_READ:
-					acceptclient(kq, eventlist[i].ident);
+					if (readstate & CHATSTATE_WRONLY)
+						continue;
+
+					readstate = CHATSTATE_NONE;
+
+					msgsize = readclient(eventlist[i].ident,
+							chatmsg,
+							eventlist[i].udata);
+
+					for (size_t i = 0; i < CHAT_MAXCON;
+							++i) {
+						if (clients[i].fd < 0)
+							continue;
+
+						clients[i].msgleft = msgsize;
+					}
+
+					readstate = CHATSTATE_WRONLY;
+
 					break;
 				case EVFILT_WRITE:
-					writeclient(eventlist[i].ident, "TEST",
+					if (readstate & CHATSTATE_RDONLY)
+						continue;
+
+					writeclient(eventlist[i].ident, chatmsg,
+							msgsize,
 							eventlist[i].udata);
+					size_t i;
+					for (i = 0; i < CHAT_MAXCON; ++i) {
+						if (clients[i].fd < 0)
+							continue;
+
+						if (clients[i].msgleft != 0)
+							break;
+					}
+
+					if (i >= CHAT_MAXCON) {
+						puts("GOING READONLY!");
+						readstate = CHATSTATE_RDONLY;
+					}
+
 					break;
 			}
 		}
@@ -233,27 +281,42 @@ static void acceptclient(int kq, int listener) {
 	if (setnbio(client) == -1)
 		err(2, NBERRSTR);
 
-	struct kevent event = {0};
-	EV_SET(&event, client, EVFILT_WRITE, EV_ADD, 0, 0, &(clients[id]));
-
-	if (kevent(kq, &event, 1, NULL, 0, NULL) < 0)
+	struct kevent event[2] = {{0}, {0}};
+	EV_SET(&event[0], client, EVFILT_WRITE, EV_ADD, 0, 0, &(clients[id]));
+	EV_SET(&event[1], client, EVFILT_READ, EV_ADD, 0, 0, &(clients[id]));
+	if (kevent(kq, event, 2, NULL, 0, NULL) < 0)
 		err(2, "kevent");
 
 	printf("Client %i connected\n", id);
 }
 
-static void writeclient(int fd, const char *msg, struct client *client) {
-	size_t len = strlen(msg);
-
-	if (write(fd, msg, len) < 0)
+static void writeclient(int fd, const char *msg, ssize_t msgsize,
+		struct client *client) {
+	ssize_t writelen = write(fd, &msg[msgsize - client->msgleft], msgsize);
+	if (writelen < 0)
 		err(2, "write");
 
-	printf("Client %ti disconnected\n", client - clients);
+	client->msgleft = client->msgleft - writelen;	
+}
 
-	client->fd = -1;
+static size_t readclient(int fd, char *msg, struct client *client) {
+	ssize_t msgsize = read(fd, msg, 1024);
+	if (msgsize < 0)
+		err(2, "read");
+	else if (msgsize == 0) {
+		printf("Client %ti disconnected\n", client - clients);
 
-	if (close(fd))
-		err(2, "close");
+		client->fd = -1;
+
+		if (close(fd))
+			err(2, "close");
+	} else {
+		printf("Client %ti: ", client - clients);
+		fwrite(msg, 1, msgsize, stdout);
+		putchar('\n');
+	}
+
+	return msgsize;
 }
 
 static void bindsocket(int sock, const char *host, const char *serv) {
