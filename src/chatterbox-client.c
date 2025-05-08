@@ -4,6 +4,9 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <poll.h>
+#include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -20,8 +23,9 @@
 #include "chatterbox.h"
 
 static int newconnect(const char *host, const char *serv);
+static void *readthread(void *sock);
 
-static int setnbio(int fd) {
+static inline int setnbio(int fd) {
 	int flags;
 #ifdef O_NONBLOCK
 	flags = fcntl(fd, F_GETFL, 0);
@@ -39,20 +43,22 @@ __attribute__((visibility("hidden")))
 int clientloop(const char *host, const char *serv) {
 	int sock = newconnect(host, serv);
 
-	if (write(sock, "HELLO", strlen("HELLO")) < 0)
-		err(2, "write");
+	pthread_t thread;
+	pthread_create(&thread, NULL, readthread, &sock);
 
-	char buf[1024];
-	ssize_t readcount = 0;
-	do {
-		readcount = read(sock, buf, 1024);
+	char *line = NULL;
+	size_t linecap = 0;
+	while (active) {
+		ssize_t linelen = getline(&line, &linecap, stdin);
+		if (linelen <= 0)
+			break;
 
-		if (readcount > 0)
-			fwrite(buf, 1, readcount, stdout);
-		else if (readcount < 0)
-			err(2, "read");
-	} while (readcount > 0);
-	putchar('\n');
+		if (write(sock, line, linelen) < 0)
+			err(2, "write");
+	}
+
+	pthread_kill(thread, SIGINT);
+	pthread_join(thread, NULL);
 
 	if (close(sock) < 0)
 		err(2, "close");
@@ -94,5 +100,41 @@ static int newconnect(const char *host, const char *serv) {
 	if (conn)
 		err(2, "connect");
 
+	if (setnbio(sock) == -1)
+		err(2, NBERRSTR);
+
 	return sock;
+}
+
+static void *readthread(void *s) {
+	int sock = *(int *)s;
+
+	struct pollfd pfd = {.fd = sock, .events = POLLIN | POLLHUP,
+		.revents = 0};
+
+	char buf[1024];
+	ssize_t readcount = 0;
+	do {
+		int pcount = poll(&pfd, 1, 3000);
+
+		if (pcount == 0)
+			continue;
+		else if (pcount < 0 && errno != EINTR)
+			err(2, "poll");
+		else if (pcount < 0)
+			continue;
+
+		readcount = read(sock, buf, 1024);
+
+		if (readcount > 0) {
+			fputs("Server: ", stdout);
+			fwrite(buf, 1, readcount, stdout);
+		} else if (readcount < 0 && errno != EAGAIN)
+			err(2, "read");
+		else if (readcount < 0)
+			continue;
+	} while (readcount > 0 && active);
+	putchar('\n');
+
+	return NULL;
 }

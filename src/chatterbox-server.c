@@ -29,7 +29,7 @@ static void writeclient(int client, const char *msg, ssize_t msgsize,
 
 static size_t readclient(int client, char *msg, struct client *);
 
-static int setnbio(int fd) {
+static inline int setnbio(int fd) {
 	int flags;
 #ifdef O_NONBLOCK
 	flags = fcntl(fd, F_GETFL, 0);
@@ -132,10 +132,8 @@ int serverloop(const char *host, const char *serv) {
 							break;
 					}
 
-					if (i >= CHAT_MAXCON) {
-						puts("GOING READONLY!");
+					if (i >= CHAT_MAXCON)
 						readstate = CHATSTATE_RDONLY;
-					}
 
 					break;
 			}
@@ -188,18 +186,25 @@ static void acceptclient(int kq, int listener) {
 
 static void writeclient(int fd, const char *msg, ssize_t msgsize,
 		struct client *client) {
+	if (msgsize <= 0)
+		return;
+
 	ssize_t writelen = write(fd, &msg[msgsize - client->msgleft], msgsize);
-	if (writelen < 0)
-		err(2, "write");
+	if (writelen < 0) {
+		warn("write");
+		return;
+	}
 
 	client->msgleft = client->msgleft - writelen;	
 }
 
 static size_t readclient(int fd, char *msg, struct client *client) {
 	ssize_t msgsize = read(fd, msg, 1024);
-	if (msgsize < 0)
-		err(2, "read");
-	else if (msgsize == 0) {
+	if (msgsize < 0) {
+		warn("read");
+		goto disconnect;
+	} else if (msgsize == 0) {
+disconnect:
 		printf("Client %ti disconnected\n", client - clients);
 
 		client->fd = -1;

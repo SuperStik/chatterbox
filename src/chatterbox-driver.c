@@ -67,7 +67,7 @@ static void setupsignals(void) {
 	const struct sigaction action = {
 		.sa_handler = setinactive,
 		.sa_mask = mask,
-		.sa_flags = SA_RESTART
+		.sa_flags = 0
 	};
 
 	if (sigaction(SIGINT, &action, NULL))
