@@ -129,10 +129,9 @@ static void *readthread(void *s) {
 
 		readcount = read(sock, buf, 1024);
 
-		if (readcount > 0) {
-			fputs("Server: ", stdout);
+		if (readcount > 0)
 			fwrite(buf, 1, readcount, stdout);
-		} else if (readcount < 0 && errno != EAGAIN)
+		else if (readcount < 0 && errno != EAGAIN)
 			err(2, "read");
 		else if (readcount < 0)
 			continue;

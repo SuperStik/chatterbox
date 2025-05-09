@@ -25,7 +25,7 @@ static void bindsocket(int sock, const char *host, const char *serv);
 
 static void acceptclient(int kq, int listener);
 static void writeclient(int client, const char *msg, ssize_t msgsize,
-		struct client *);
+		struct client *, int clientno);
 
 static size_t readclient(int client, char *msg, struct client *);
 
@@ -79,6 +79,7 @@ int serverloop(const char *host, const char *serv) {
 	char chatmsg[256];
 	ssize_t msgsize = 0;
 	int readstate = CHATSTATE_RDONLY;
+	int clientno = -1;
 	while(active) {
 		struct kevent eventlist[CHAT_MAXCON];
 		memset(eventlist, 0, sizeof(eventlist));
@@ -104,6 +105,8 @@ int serverloop(const char *host, const char *serv) {
 					msgsize = readclient(eventlist[i].ident,
 							chatmsg,
 							eventlist[i].udata);
+					struct client *cl = eventlist[i].udata;
+					clientno = cl - clients;
 
 					for (size_t i = 0; i < CHAT_MAXCON;
 							++i) {
@@ -122,7 +125,8 @@ int serverloop(const char *host, const char *serv) {
 
 					writeclient(eventlist[i].ident, chatmsg,
 							msgsize,
-							eventlist[i].udata);
+							eventlist[i].udata,
+							clientno);
 					size_t i;
 					for (i = 0; i < CHAT_MAXCON; ++i) {
 						if (clients[i].fd < 0)
@@ -185,10 +189,11 @@ static void acceptclient(int kq, int listener) {
 }
 
 static void writeclient(int fd, const char *msg, ssize_t msgsize,
-		struct client *client) {
+		struct client *client, int clientno) {
 	if (msgsize <= 0)
 		return;
 
+	dprintf(fd, "Client %i: ", clientno);
 	ssize_t writelen = write(fd, &msg[msgsize - client->msgleft], msgsize);
 	if (writelen < 0) {
 		warn("write");
