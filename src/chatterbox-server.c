@@ -23,7 +23,7 @@
 
 static void bindsocket(int sock, const char *host, const char *serv);
 
-static void acceptclient(int kq, int listener);
+static void acceptclient(int kq[2], int listener);
 static void writeclient(int client, const char *msg, ssize_t msgsize,
 		struct client *, int clientno);
 
@@ -54,9 +54,13 @@ int serverloop(const char *host, const char *serv) {
 	if (listener < 0)
 		err(2, "socket");
 
-	const int off;
+	const int off = 0;
 	if (setsockopt(listener, IPPROTO_IPV6, IPV6_V6ONLY, &off, sizeof(off)))
 		err(2, "setsockopt");
+
+	const int on = 1;
+	if (setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)))
+	       warn("setsockopt");
 
 	bindsocket(listener, host, serv);
 
@@ -66,15 +70,20 @@ int serverloop(const char *host, const char *serv) {
 	if (listen(listener, SOMAXCONN))
 		err(2, "listen");
 
-	int kq = kqueue();
-	if (kq < 0)
-		err(2, "kqueue");
+	int kq[2];
+	for (int i = 0; i < 2; ++i) {
+		kq[i] = kqueue();
+		if (kq[i] < 0)
+			err(2, "kqueue");
+	}
 
 	struct kevent event = {0};
 	EV_SET(&event, listener, EVFILT_READ, EV_ADD, 0, 0, NULL);
 
-	if (kevent(kq, &event, 1, NULL, 0, NULL) < 0)
-		err(2, "kevent");
+	for (int i = 0; i < 2; ++i) {
+		if (kevent(kq[i], &event, 1, NULL, 0, NULL) < 0)
+			err(2, "kevent");
+	}
 
 	char chatmsg[256];
 	ssize_t msgsize = 0;
@@ -84,7 +93,10 @@ int serverloop(const char *host, const char *serv) {
 		struct kevent eventlist[CHAT_MAXCON];
 		memset(eventlist, 0, sizeof(eventlist));
 
-		int nevents = kevent(kq, NULL, 0, eventlist, 4, NULL);
+		int isreading = (readstate & CHATSTATE_RDONLY) ==
+			CHATSTATE_RDONLY;
+		int nevents = kevent(kq[isreading], NULL, 0, eventlist, 4,
+				NULL);
 		if (nevents < 0 && errno == EINTR)
 			continue;
 		else if (nevents < 0)
@@ -144,8 +156,10 @@ int serverloop(const char *host, const char *serv) {
 		}
 	}
 
-	if (close(kq))
-		err(2, "close");
+	for (int i = 0; i < 2; ++i) {
+		if (close(kq[i]))
+			err(2, "close");
+	}
 
 	if (close(listener))
 		err(2, "close");
@@ -153,7 +167,7 @@ int serverloop(const char *host, const char *serv) {
 	return 0;
 }
 
-static void acceptclient(int kq, int listener) {
+static void acceptclient(int kq[2], int listener) {
 	int client = accept(listener, NULL, NULL);
 	if (client < 0) {
 		warn("accept");
@@ -182,8 +196,10 @@ static void acceptclient(int kq, int listener) {
 	struct kevent event[2] = {{0}, {0}};
 	EV_SET(&event[0], client, EVFILT_WRITE, EV_ADD, 0, 0, &(clients[id]));
 	EV_SET(&event[1], client, EVFILT_READ, EV_ADD, 0, 0, &(clients[id]));
-	if (kevent(kq, event, 2, NULL, 0, NULL) < 0)
-		err(2, "kevent");
+	for (int i = 0; i < 2; ++i) {
+		if (kevent(kq[i], &event[i], 1, NULL, 0, NULL) < 0)
+			err(2, "kevent");
+	}
 
 	printf("Client %i connected\n", id);
 }
