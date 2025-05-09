@@ -8,6 +8,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -59,6 +60,8 @@ int clientloop(const char *host, const char *serv) {
 
 	pthread_kill(thread, SIGINT);
 	pthread_join(thread, NULL);
+
+	free(line);
 
 	if (close(sock) < 0)
 		err(2, "close");
