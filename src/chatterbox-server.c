@@ -90,6 +90,7 @@ int serverloop(const char *host, const char *serv) {
 	int readstate = CHATSTATE_RDONLY;
 	int clientno = -1;
 	while(active) {
+retry:;
 		struct kevent eventlist[CHAT_MAXCON];
 		memset(eventlist, 0, sizeof(eventlist));
 
@@ -106,6 +107,26 @@ int serverloop(const char *host, const char *serv) {
 			if (eventlist[i].ident == listener) {
 				acceptclient(kq, eventlist[i].ident);
 				continue;
+			}
+			if (eventlist[i].flags & EV_EOF) {
+				readstate = CHATSTATE_NONE;
+
+				close(eventlist[i].ident);
+				struct client *cl = eventlist[i].udata;
+				cl->fd = -1;
+
+				snprintf(chatmsg, 256, "Client %i disconnected",
+						(int)eventlist[i].ident);
+				size_t msgsize = strlen(chatmsg);
+				for (size_t i = 0; i < CHAT_MAXCON; ++i) {
+					if (clients[i].fd < 0)
+						continue;
+
+					clients[i].msgleft = msgsize;
+				}
+
+				readstate = CHATSTATE_WRONLY;
+				goto retry;
 			}
 			switch(eventlist[i].filter) {
 				case EVFILT_READ:
