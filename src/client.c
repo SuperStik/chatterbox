@@ -6,7 +6,6 @@
 #include <netinet/in.h>
 #include <poll.h>
 #include <pthread.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -44,19 +43,55 @@ __attribute__((visibility("hidden")))
 int clientloop(const char *host, const char *serv) {
 	int sock = newconnect(host, serv);
 
-	pthread_t thread;
-	pthread_create(&thread, NULL, readthread, &sock);
-
 	char *line = NULL;
-	size_t linecap = 0;
-	while (active) {
-		ssize_t linelen = getline(&line, &linecap, stdin);
-		if (linelen <= 0)
-			break;
+	pthread_t thread;
+	pthread_create(&thread, NULL, readthread, &line);
 
-		if (write(sock, line, linelen) < 0)
-			err(2, "write");
-	}
+	struct pollfd pfd = {.fd = sock, .events = POLLHUP | POLLIN | POLLOUT,
+		.revents = 0};
+
+	char buf[1024];
+	ssize_t readcount = 0;
+	do {
+		int pcount = poll(&pfd, 1, -1);
+
+		if (pcount == 0)
+			continue;
+		else if (pcount < 0 && errno != EINTR)
+			err(2, "poll");
+		else if (pcount < 0)
+			continue;
+
+		if (pfd.revents & POLLHUP) {
+			active = 0;
+			break;
+		}
+
+		if (pfd.revents & POLLIN) {
+			readcount = read(sock, buf, 1024);
+
+			if (readcount > 0) {
+				fwrite(buf, 1, readcount, stdout);
+			} else if (readcount < 0 && errno != EAGAIN)
+				err(2, "read");
+			else if (readcount < 0)
+				continue;
+		}
+
+		if (pfd.revents & POLLOUT) {
+			char *line_out = __atomic_exchange_n(&line, NULL,
+					__ATOMIC_RELAXED);
+			if (line_out == NULL)
+				continue;
+
+			size_t len = strnlen(line_out, 1024);
+			if (write(sock, line_out, len) < 0)
+				err(2, "write");
+
+			free(line_out);
+		}
+	} while (active);
+	putchar('\n');
 
 	pthread_kill(thread, SIGINT);
 	pthread_join(thread, NULL);
@@ -113,34 +148,30 @@ static int newconnect(const char *host, const char *serv) {
 	return sock;
 }
 
-static void *readthread(void *s) {
-	int sock = *(int *)s;
+static void *readthread(void *l) {
+	char **line_out = l;
 
-	struct pollfd pfd = {.fd = sock, .events = POLLIN | POLLHUP,
-		.revents = 0};
+	size_t linecap = 0;
+	char *line;
+	while (active) {
+		ssize_t linelen = getline(&line, &linecap, stdin);
+		if (linelen < 0) {
+			if (errno == EINTR)
+				break;
+			else
+				err(2, "getline");
+		}
 
-	char buf[1024];
-	ssize_t readcount = 0;
-	do {
-		int pcount = poll(&pfd, 1, 3000);
+		line[linelen - 1] = '\0';
 
-		if (pcount == 0)
-			continue;
-		else if (pcount < 0 && errno != EINTR)
-			err(2, "poll");
-		else if (pcount < 0)
-			continue;
+		char *line_new = malloc(linelen);
+		if (line_new == NULL)
+				err(2, "malloc");
 
-		readcount = read(sock, buf, 1024);
+		memcpy(line_new, line, linelen);
 
-		if (readcount > 0)
-			fwrite(buf, 1, readcount, stdout);
-		else if (readcount < 0 && errno != EAGAIN)
-			err(2, "read");
-		else if (readcount < 0)
-			continue;
-	} while (readcount > 0 && active);
-	putchar('\n');
+		free(__atomic_exchange_n(line_out, line_new, __ATOMIC_RELAXED));
+	}
 
 	return NULL;
 }
