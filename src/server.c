@@ -219,6 +219,10 @@ static void acceptclient(int kq[2], int listener) {
 	if (setnbio(client) == -1)
 		warn(NBERRSTR);
 
+	const int one = 1;
+	if (setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one)))
+		err(2, "setsockopt");
+
 	struct kevent event[2] = {{0}, {0}};
 	EV_SET(&event[0], client, EVFILT_WRITE, EV_ADD, 0, 0, &(clients[id]));
 	EV_SET(&event[1], client, EVFILT_READ, EV_ADD, 0, 0, &(clients[id]));

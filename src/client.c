@@ -106,6 +106,10 @@ static int newconnect(const char *host, const char *serv) {
 	if (setnbio(sock) == -1)
 		err(2, NBERRSTR);
 
+	const int one = 1;
+	if (setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one)))
+		err(2, "setsockopt");
+
 	return sock;
 }
 
