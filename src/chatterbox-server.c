@@ -12,11 +12,11 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#ifndef O_NONBLOCK
+#ifdef O_NONBLOCK
+# define NBERRSTR "fcntl"
+#else
 # define NBERRSTR "ioctl"
 # include <sys/ioctl.h>
-#else
-# define NBERRSTR "fcntl"
 #endif /* O_NONBLOCK */
 
 #include "chatterbox.h"
@@ -35,11 +35,16 @@ static inline int setnbio(int fd) {
 	flags = fcntl(fd, F_GETFL, 0);
 	if (flags < 0)
 		flags = 0;
+	else if (__builtin_expect(flags & O_NONBLOCK, 0))
+		return 0;
 
 	return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-#else
+#elif defined(FIONBIO)
 	flags = 1;
 	return ioctl(fd, FIONBIO, &flags);
+#else
+	errno = EINVAL;
+	return -1;
 #endif
 }
 
@@ -65,7 +70,7 @@ int serverloop(const char *host, const char *serv) {
 	bindsocket(listener, host, serv);
 
 	if (setnbio(listener) == -1)
-		err(2, NBERRSTR);
+		warn(NBERRSTR);
 
 	if (listen(listener, SOMAXCONN))
 		err(2, "listen");
@@ -212,7 +217,7 @@ static void acceptclient(int kq[2], int listener) {
 	clients[id].msgleft = 0;
 
 	if (setnbio(client) == -1)
-		err(2, NBERRSTR);
+		warn(NBERRSTR);
 
 	struct kevent event[2] = {{0}, {0}};
 	EV_SET(&event[0], client, EVFILT_WRITE, EV_ADD, 0, 0, &(clients[id]));
